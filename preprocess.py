@@ -43,11 +43,11 @@ def main():
     nlppreprocess.replace_rare_words.run(
             "tmp.txt.lowercase.tokenize.replace_digits.append_eos.train",
             prep + ".train",
-            prep + ".train.vocabulary")
+            path_vocab=prep + ".train.vocab")
     nlppreprocess.replace_rare_words.run(
             "tmp.txt.lowercase.tokenize.replace_digits.append_eos.val",
             prep + ".val",
-            prep + ".train.vocabulary")
+            path_vocab=prep + ".train.vocab")
     nlppreprocess.flatten.run(
             prep + ".train",
             prep + ".train.flatten")
