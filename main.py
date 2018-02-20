@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import time
 
 import chainer
 from chainer import cuda, optimizers, serializers, Variable
@@ -9,9 +10,19 @@ import chainer.functions as F
 import numpy as np
 import pyprind
 
+import corpus_wrapper
+
 import models
 import utils
 
+def load_corpus(path_corpus, vocab, max_length):
+    start_time = time.time()
+
+    corpus = corpus_wrapper.CorpusWrapper(path_corpus, vocab=vocab, max_length=max_length)
+    utils.logger.debug("[info] Vocabulary size: %d" % len(corpus.vocab))
+
+    utils.logger.debug("[info] Completed. %d [sec.]" % (time.time() - start_time))
+    return corpus
 
 def make_labels(batch_sents):
     return [[i for i in xrange(len(s))]
@@ -85,13 +96,34 @@ def evaluate(model, corpus, lmd, identity_penalty):
     total_acc = float(cuda.to_cpu(total_acc.data)) / count   
     return total_loss, total_acc
 
+def extract_word2vec(model, vocab):
+    word2vec = {}
+    for w in vocab.keys():
+        word2vec[w] = cuda.to_cpu(model.embed.W.data[vocab[w]])
+    return word2vec
+
+def save_word2vec(path, word2vec):
+    eps = 1e-6
+    def normalize(v):
+        return v / (np.linalg.norm(v) + eps)
+    with open(path, "w") as f:
+        for w, v in word2vec.items():
+            line = " ".join([w] + [str(v_i) for v_i in v])
+            f.write("%s\n" % line.encode("utf-8"))
+    with open(path + ".normalized", "w") as f:
+        for w, v in word2vec.items():
+            v_normalized = normalize(v)
+            line = " ".join([w] + [str(v_i) for v_i in v_normalized])
+            f.write("%s\n" % line.encode("utf-8"))
+
 def main(args):
     gpu = args.gpu
     path_config = args.config
     mode = args.mode
     path_word2vec = args.word2vec
     curriculum = False if args.curriculum == 0 else True
-
+    
+    # Hyper parameters (const)
     MAX_EPOCH = 10000000000
     MAX_PATIENCE = 20
     EVAL = 10000
@@ -102,7 +134,7 @@ def main(args):
 
     config = utils.Config(path_config)
     
-    # paths
+    # Preparaton
     path_corpus_train = config.getpath("prep_corpus") + ".train"
     path_corpus_val = config.getpath("prep_corpus") + ".val"
     basename = "won.%s.%s" % (
@@ -118,6 +150,7 @@ def main(args):
         utils.set_logger(path_evaluation)
     elif mode == "analysis":
         path_analysis = os.path.join(config.getpath("analysis"), basename)
+
     utils.logger.debug("[info] TRAINING CORPUS: %s" % path_corpus_train)
     utils.logger.debug("[info] VALIDATION CORPUS: %s" % path_corpus_val)
     utils.logger.debug("[info] CONFIG: %s" % path_config)
@@ -131,7 +164,7 @@ def main(args):
     elif mode == "analysis":
         utils.logger.debug("[info] ANALYSIS: %s" % path_analysis)
 
-    # hyper parameters
+    # Hyper parameters
     word_dim = config.getint("word_dim")
     state_dim = config.getint("state_dim")
     aggregation = config.getstr("aggregation")
@@ -144,6 +177,7 @@ def main(args):
     grad_clip = config.getfloat("grad_clip")
     weight_decay = config.getfloat("weight_decay")
     batch_size = config.getint("batch_size")
+
     utils.logger.debug("[info] WORD DIM: %d" % word_dim)
     utils.logger.debug("[info] STATE DIM: %d" % state_dim)
     utils.logger.debug("[info] AGGREGATION METHOD: %s" % aggregation)
@@ -156,22 +190,23 @@ def main(args):
     utils.logger.debug("[info] GRADIENT CLIPPING: %f" % grad_clip)
     utils.logger.debug("[info] WEIGHT DECAY: %f" % weight_decay)
     utils.logger.debug("[info] BATCH SIZE: %d" % batch_size)
+
     if retrofitting:
         assert path_word2vec is not None
 
-    # data preparation
+    # Data preparation
     corpus_train_list = [
-        utils.load_corpus(
+        load_corpus(
                 path_corpus_train,
                 vocab=path_corpus_train + ".vocab",
                 max_length=length_limit)
         for length_limit in LENGTH_LIMITS]
-    corpus_val = utils.load_corpus(
+    corpus_val = load_corpus(
                 path_corpus_val,
                 vocab=corpus_train_list[0].vocab,
                 max_length=LENGTH_LIMITS[-1])
 
-    # model preparation 
+    # Model preparation 
     if (mode == "train") and (path_word2vec is not None):
         initialW_data = utils.load_word2vec_weight_matrix(
                                     path_word2vec,
@@ -193,6 +228,7 @@ def main(args):
         serializers.load_npz(path_snapshot, model)
     model.to_gpu(gpu)
     
+    # Training/Evaluation/Analysis
     if mode == "train":
         length_index = 0
         utils.logger.debug("[info] Evaluating on the validation set ...")
@@ -304,7 +340,7 @@ def main(args):
                         patience = 0
                         serializers.save_npz(path_snapshot, model)
                         serializers.save_npz(path_snapshot + ".opt", opt)
-                        utils.save_word2vec(path_snapshot_vectors, utils.extract_word2vec(model, corpus_train_list[length_index].vocab))
+                        save_word2vec(path_snapshot_vectors, extract_word2vec(model, corpus_train_list[length_index].vocab))
                         utils.logger.debug("[info] Saved.")
                     else:
                         patience += 1

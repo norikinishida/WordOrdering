@@ -4,15 +4,12 @@ import logging
 from logging import getLogger, Formatter, StreamHandler, DEBUG
 import os
 import sys
-import time
 
 import numpy as np
 from chainer import cuda, Variable
 
-import corpus_wrapper
-
 ##############################
-# global
+# logging
 
 logger = getLogger("logger")
 logger.setLevel(DEBUG)
@@ -32,7 +29,12 @@ def set_logger(filename):
     logging.basicConfig(level=DEBUG, format="%(message)s", filename=filename, filemode="w")
 
 ##############################
-# word2vec
+# pre-trained word embeddings
+
+def load_word2vec_weight_matrix(path, dim, vocab, scale):
+    word2vec = load_word2vec(path, dim=dim)
+    W = convert_word2vec_to_weight_matrix(vocab, word2vec, dim=dim, scale=scale)
+    return W
 
 def load_word2vec(path, dim):
     word2vec = {}
@@ -60,13 +62,8 @@ def convert_word2vec_to_weight_matrix(vocab, word2vec, dim, scale):
         W[vocab[w], :] = word2vec[w]
     return W
 
-def load_word2vec_weight_matrix(path, dim, vocab, scale):
-    word2vec = load_word2vec(path, dim=dim)
-    W = convert_word2vec_to_weight_matrix(vocab, word2vec, dim=dim, scale=scale)
-    return W
-
 ##############################
-# batch
+# NN
 
 def padding(xs, head, with_mask):
     N = len(xs)
@@ -97,41 +94,6 @@ def convert_ndarray_to_variable(xs, seq, train):
                     for j in xrange(xs.shape[1])]
     else:
         return Variable(cuda.cupy.asarray(xs), volatile=not train)
-
-##############################
-# loading & saving
-
-def extract_word2vec(model, vocab):
-    word2vec = {}
-    for w in vocab.keys():
-        word2vec[w] = cuda.to_cpu(model.embed.W.data[vocab[w]])
-    return word2vec
-
-def save_word2vec(path, word2vec):
-    eps = 1e-6
-    def normalize(v):
-        return v / (np.linalg.norm(v) + eps)
-    with open(path, "w") as f:
-        for w, v in word2vec.items():
-            line = " ".join([w] + [str(v_i) for v_i in v])
-            f.write("%s\n" % line.encode("utf-8"))
-    with open(path + ".normalized", "w") as f:
-        for w, v in word2vec.items():
-            v_normalized = normalize(v)
-            line = " ".join([w] + [str(v_i) for v_i in v_normalized])
-            f.write("%s\n" % line.encode("utf-8"))
-
-##############################
-# corpus
-
-def load_corpus(path_corpus, vocab, max_length):
-    start_time = time.time()
-
-    corpus = corpus_wrapper.CorpusWrapper(path_corpus, vocab=vocab, max_length=max_length)
-    logger.debug("[info] Vocabulary size: %d" % len(corpus.vocab))
-
-    logger.debug("[info] Completed. %d [sec.]" % (time.time() - start_time))
-    return corpus
 
 ##############################
 # others
