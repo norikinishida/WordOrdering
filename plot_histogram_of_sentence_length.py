@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import pyprind
 
 import utils
+from main import load_corpus
 
 def count_sentence_length(corpus, count):
     for s in pyprind.prog_bar(corpus):
@@ -29,11 +30,11 @@ def main():
     
     path_corpus_train = config.getpath("prep_corpus") + ".train"
     path_corpus_val = config.getpath("prep_corpus") + ".val"
-    corpus_train = utils.load_corpus(
+    corpus_train = load_corpus(
                     path_corpus_train,
                     vocab=path_corpus_train + ".vocab",
                     max_length=1000000000)
-    corpus_val = utils.load_corpus(path_corpus_val,
+    corpus_val = load_corpus(path_corpus_val,
                     vocab=corpus_train.vocab,
                     max_length=1000000000)
     
